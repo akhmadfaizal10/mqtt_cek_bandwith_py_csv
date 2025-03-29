@@ -11,21 +11,24 @@ BROKER = "test.mosquitto.org"  # Ganti jika pakai broker lain
 PORT = 1883
 TOPIC = "dinusrobotic/bbm"
 
-# Variabel penyimpanan
-data_list = []  # Simpan 10 data per batch
-average_list = []  # Simpan 10 hasil rata-rata
-trial_counter = 1  # Menandai percobaan keberapa
+# Parameter fleksibel
+DATA_BATCH_SIZE = 10  # Jumlah data yang dikumpulkan sebelum dihitung rata-rata
 MAX_TRIALS = 10  # Batas percobaan maksimal
+
+# Variabel penyimpanan
+data_list = []  # Simpan data per batch
+average_list = []  # Simpan hasil rata-rata
+trial_counter = 1  # Menandai percobaan keberapa
 
 # Variabel monitoring
 last_time = time.time()
 
 def calculate_average():
-    """Menghitung rata-rata dari 10 data terakhir"""
+    """Menghitung rata-rata dari DATA_BATCH_SIZE data terakhir"""
     global trial_counter
-    if len(data_list) == 10:
-        avg_latency = sum(d[2] for d in data_list) / 10
-        avg_bandwidth = sum(d[3] for d in data_list) / 10
+    if len(data_list) == DATA_BATCH_SIZE:
+        avg_latency = round(sum(d[3] for d in data_list) / DATA_BATCH_SIZE, 3)
+        avg_bandwidth = round(sum(d[4] for d in data_list) / DATA_BATCH_SIZE, 3)
         average_list.append([trial_counter, avg_latency, avg_bandwidth])
         save_to_csv()  # Simpan data setiap batch selesai
         
@@ -47,27 +50,20 @@ def reset_data():
     print("\n⚠️ Semua data telah direset dari CMD! ⚠️\n")
 
 def save_to_csv():
-    """Simpan data ke  Excel"""
-    # Simpan Data Masuk (Append Mode)
-    with open("data_masuk.xlsx", mode="a", newline="") as file:
-        writer = csv.writer(file)
-        if file.tell() == 0:  # Jika file kosong, tulis header dulu
-            writer.writerow(["Percobaan Ke", "No", "Latency (s)", "Bandwidth (kbps)"])
-        writer.writerows(data_list)
-
-    # Simpan Data Rata-rata (Append Mode)
-    df = pd.DataFrame(average_list, columns=["Percobaan Ke", "Rata-rata Latency (s)", "Rata-rata Bandwidth (kbps)"])
-    df.to_csv("data_rata_rata.xlsx", mode="a", header=not pd.io.common.file_exists("data_rata_rata.xlsx"), index=False)
+    """Simpan data ke CSV & Excel"""
+    df_data = pd.DataFrame(data_list, columns=["Percobaan Ke", "No", "Value", "Latency (s)", "Bandwidth (kbps)"])
+    df_data.to_csv("data_masuk.csv", mode="a", header=not pd.io.common.file_exists("data_masuk.csv"), index=False)
     
-    # Simpan ke Excel (overwrite tetap perlu karena Excel tidak bisa append langsung)
-    df.to_excel("data_rata_rata.xlsx", index=False)
+    df_avg = pd.DataFrame(average_list, columns=["Percobaan Ke", "Rata-rata Latency (s)", "Rata-rata Bandwidth (kbps)"])
+    df_avg.to_csv("data_rata_rata.csv", mode="a", header=not pd.io.common.file_exists("data_rata_rata.csv"), index=False)
+    df_avg.to_excel("data_rata_rata.xlsx", index=False)
     
     print("\n✅ Data telah disimpan ke CSV & Excel!\n")
 
 def print_tables():
     """Menampilkan tabel data & rata-rata"""
-    print("\n📊 Data Masuk (10 Terakhir):")
-    headers = ["Percobaan Ke", "No", "Latency (s)", "Bandwidth (kbps)"]
+    print("\n📊 Data Masuk:")
+    headers = ["Percobaan Ke", "No", "Value", "Latency (s)", "Bandwidth (kbps)"]
     print(tabulate(data_list, headers, tablefmt="grid"))
 
     print("\n📈 Tabel Rata-rata:")
@@ -85,16 +81,17 @@ def on_message(client, userdata, msg):
         client.disconnect()
         sys.exit(0)
 
+    message_value = msg.payload.decode("utf-8")
     message_size_bytes = sys.getsizeof(msg.payload)
     message_size_bits = message_size_bytes * 8  
 
     current_time = time.time()
-    elapsed_time = current_time - last_time if last_time else 0
+    elapsed_time = round(current_time - last_time if last_time else 0, 3)
     last_time = current_time
 
-    bandwidth_kbps = (message_size_bits / 1000) / elapsed_time if elapsed_time > 0 else 0
+    bandwidth_kbps = round((message_size_bits / 1000) / elapsed_time if elapsed_time > 0 else 0, 3)
 
-    data_list.append([trial_counter, len(data_list) + 1, elapsed_time, bandwidth_kbps])
+    data_list.append([trial_counter, len(data_list) + 1, message_value, elapsed_time, bandwidth_kbps])
 
     if calculate_average():
         data_list.clear()
